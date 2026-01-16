@@ -292,11 +292,10 @@ def check_continuity(address, addresses, length):
 
 
 def overflow_detect_filter(simgr):
-
     for state in simgr.active:
-        if state.globals.get("type", None) == "overflow_variable":
+        user_input = state.globals.get("user_input", None)
+        if user_input is not None:
             log.info("Found vulnerable state. Overflow variable to win")
-            user_input = state.globals["user_input"]
             input_bytes = state.solver.eval(user_input, cast_to=bytes)
             log.info("[+] Vulnerable path found {}".format(input_bytes))
             state.globals["type"] = "overflow_variable"
