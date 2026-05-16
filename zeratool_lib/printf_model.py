@@ -9,6 +9,31 @@ from simgr_helper import get_trimmed_input
 
 log = logging.getLogger(__name__)
 
+# ELF sh_flags: SHF_WRITE — literals live in sections without this bit.
+_SHF_WRITE = 0x1
+
+
+def format_string_ptr_is_read_only(project, ptr):
+    """
+    True if ptr is in a non-writable ELF section (e.g. .rodata).
+
+    Calls like printf("Hello ") use such pointers; they are never the
+    attacker-controlled buffer from read()/argv, so the format-string check
+    should skip them and let execution reach printf(user_buf).
+    """
+    sec = project.loader.find_section_containing(ptr)
+    if sec is None:
+        return False
+    flags = getattr(sec, "flags", None)
+    if flags is not None:
+        try:
+            return (int(flags) & _SHF_WRITE) == 0
+        except (TypeError, ValueError):
+            pass
+    name = getattr(sec, "name", "") or ""
+    return name.startswith(".rodata") or name in (".rdata",)
+
+
 # Better symbolic strlen
 def get_max_strlen(state, value):
     i = 0
@@ -63,15 +88,46 @@ class printFormat(angr.procedures.libc.printf.printf):
         #     state.add_constraints(fmt_len == max_read_len)
 
         if len(self.arguments) <= i:
+            log.info("[entry] printFormat: no argument at index %d", i)
             return False
         printf_arg = self.arguments[i]
 
         var_loc = solv(printf_arg)
 
+        try:
+            head_bv = state.memory.load(var_loc, 8)
+            head = solv(head_bv, cast_to=bytes)
+            head_sym = any(
+                state.memory.load(var_loc + b, 1).symbolic for b in range(8)
+            )
+            stdin_head = state.posix.dumps(0)[:16]
+            log.info(
+                "[entry] printFormat hit: ptr=%s head=%r head_has_symbolic=%s stdin[:16]=%r",
+                hex(var_loc),
+                head,
+                head_sym,
+                stdin_head,
+            )
+        except Exception as e:
+            log.info("[entry] printFormat hit: ptr=%s diag_error=%s", hex(var_loc), e)
+
+        if format_string_ptr_is_read_only(state.project, var_loc):
+            log.info(
+                "[entry] skipping read-only format pointer %s", hex(var_loc)
+            )
+            return False
+
         # Parts of this argument could be symbolic, so we need
         # to check every byte
         var_data = state.memory.load(var_loc, max_read_len)
         var_len = get_max_strlen(state, var_data)
+        log.info("[entry] get_max_strlen returned %d for ptr=%s", var_len, hex(var_loc))
+        # Zero-init stack buffers (e.g. char buf[256] = {0}) make byte 0 a
+        # concrete NUL, so get_max_strlen returns 0 before read() merges in
+        # stdin — scan a bounded window for symbolic bytes anyway.
+        if var_len == 0:
+            var_len = min(max_read_len, 256)
+            log.info("[entry] forcing var_len=%d for diagnostic scan", var_len)
 
         fmt_len = self._sim_strlen(fmt)
         # if len(state.solver.eval_upto(fmt_len,2)) > 1:
@@ -111,6 +167,30 @@ class printFormat(angr.procedures.libc.printf.printf):
                     position = i - 1 - count
                     # previous position minus greatest count
                 count = 0
+        
+        try:
+            log.info(f"\n--- DEBUG: Inspecting Buffer at {hex(var_loc)} ---")
+            
+            # 1. Dump what the program has read from STDIN so far
+            stdin_dump = state.posix.dumps(0)
+            log.info(f"[DEBUG] Full STDIN content: {stdin_dump}")
+
+            # 2. Dump the specific string argument passed to printf
+            # We load 32 bytes just to see what follows, even if var_len is 0
+            raw_memory = state.memory.load(var_loc, 32)
+            concrete_string = state.solver.eval(raw_memory, cast_to=bytes)
+            log.info(f"[DEBUG] String passed to printf: {concrete_string}")
+            
+            # 3. Check the symbolic constraints on the first byte
+            first_byte = state.memory.load(var_loc, 1)
+            can_be_null = state.solver.satisfiable(extra_constraints=[first_byte == 0])
+            must_be_null = not state.solver.satisfiable(extra_constraints=[first_byte != 0])
+            log.info(f"[DEBUG] First byte can be NULL? {can_be_null}")
+            log.info(f"[DEBUG] First byte MUST be NULL? {must_be_null}")
+            log.info("---------------------------------------------------\n")
+        except Exception as e:
+            log.info(f"[DEBUG] Error dumping state: {e}")
+
         log.info(
             "[+] Found symbolic buffer at position {} of length {}".format(
                 position, greatest_count
@@ -121,8 +201,15 @@ class printFormat(angr.procedures.libc.printf.printf):
             str_val = b"%lx_"
             if bits == 64:
                 str_val = b"%llx_"
+            # Only constrain the symbolic run we just measured. Using `var_len`
+            # (max strlen) ran past stdin's filled length into concrete zero
+            # bytes (e.g. tail of `name[256] = {0}`), making the byte-by-byte
+            # check fail and dropping the path to the real printf with a
+            # symbolic fmt -> "Symbolic (format) string, game over".
+            constrain_loc = var_loc + position
+            constrain_len = greatest_count
             if self.can_constrain_bytes(
-                state, var_data, var_loc, position, var_len, strVal=str_val
+                state, var_data, constrain_loc, position, constrain_len, strVal=str_val
             ):
                 log.info("[+] Can constrain bytes")
                 log.info("[+] Constraining input to leak")
@@ -130,9 +217,9 @@ class printFormat(angr.procedures.libc.printf.printf):
                 self.constrainBytes(
                     state,
                     var_data,
-                    var_loc,
+                    constrain_loc,
                     position,
-                    var_len,
+                    constrain_len,
                     strVal=str_val,
                 )
                 # Verify solution
@@ -199,7 +286,11 @@ class printFormat(angr.procedures.libc.printf.printf):
                     "[~] Byte {} not constrained to {}".format(i, strVal[strValIndex])
                 )
 
-    def run(self, _, fmt):
+    def run(self, fmt):
+        # NOTE: angr's printf.run is `run(self, fmt)`. The original Zeratool
+        # used `(self, _, fmt)` which is the signature for __printf_chk and
+        # makes the SimProcedure pull a second CC arg (stack garbage). That
+        # garbage was then forwarded to super().run, often crashing the path.
         if not self.checkExploitable(fmt):
             return super(type(self), self).run(fmt)
 

@@ -56,11 +56,21 @@ def checkFormat(binary_name, inputType):
     # Lame way to do a timeout
     try:
 
-        @timeout_decorator.timeout(1200, use_signals=False)
+        # @timeout_decorator.timeout(1200)
         def exploreBinary(simgr):
-            return simgr.explore(find=lambda s: "type" in s.globals)
+            simgr.explore(find=lambda s: "type" in s.globals)
 
-        simgr = exploreBinary(simgr)
+        exploreBinary(simgr)
+        log.info(
+            "[stashes] active=%d found=%d errored=%d deadended=%d unconstrained=%d",
+            len(simgr.active),
+            len(simgr.found),
+            len(simgr.errored),
+            len(simgr.deadended),
+            len(simgr.unconstrained),
+        )
+        for es in simgr.errored[:5]:
+            log.info("[errored] addr=%s err=%s", hex(es.state.addr), es.error)
         if "found" in simgr.stashes and len(simgr.found):
             end_state = simgr.found[0]
             run_environ["type"] = end_state.globals["type"]
@@ -70,7 +80,8 @@ def checkFormat(binary_name, inputType):
     except (KeyboardInterrupt, timeout_decorator.TimeoutError) as e:
         print("[~] Format check timed out")
 
-    if "input" in end_state.globals.keys():
+    # if "input" in end_state.globals.keys():
+    if end_state is not None and "input" in end_state.globals.keys():
         run_environ["input"] = end_state.globals["input"]
         print("[+] Triggerable with input : {}".format(end_state.globals["input"]))
 

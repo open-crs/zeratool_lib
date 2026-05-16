@@ -69,7 +69,7 @@ def leak_remote_functions(binary_name, properties, inputType):
     # Lame way to do a timeout
     try:
 
-        @timeout_decorator.timeout(1200, use_signals=False)
+        # @timeout_decorator.timeout(1200)
         def exploreBinary(simgr):
             simgr.explore(
                 find=lambda s: "libc" in s.globals, step_func=leak_remote_libc_functions
