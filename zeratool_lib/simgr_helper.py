@@ -26,7 +26,7 @@ def constrainToAddress(state, sym_val, addr, endian="little"):
         padded_addr = p32(topAddr, endian=endian) + p32(botAddr, endian=endian)
 
     constraints = []
-    for i in range(bits / 8):
+for i in range(bits // 8):
         curr_byte = sym_val.get_byte(i)
         constraint = claripy.And(curr_byte == padded_addr[i])
         if state.solver.satisfiable(extra_constraints=[constraint]):
