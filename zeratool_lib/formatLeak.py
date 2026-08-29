@@ -5,7 +5,7 @@ import string
 from pwn import *
 
 
-def checkLeak(binary_name, properties, leak_format) -> bytes:
+def checkLeak(binary_name, properties, leak_format) -> bytes | None:
     # No leak target requested (e.g. plain shellcode exploit) -> nothing to do.
     # Avoids `re.match("", bytes)` TypeError when the default `""` falls through.
     if not leak_format:
