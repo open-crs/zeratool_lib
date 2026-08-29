@@ -169,11 +169,10 @@ class printFormat(angr.procedures.libc.printf.printf):
                 count = 0
         
         try:
-            log.info(f"\n--- DEBUG: Inspecting Buffer at {hex(var_loc)} ---")
-            
-            # 1. Dump what the program has read from STDIN so far
-            stdin_dump = state.posix.dumps(0)
-            log.info(f"[DEBUG] Full STDIN content: {stdin_dump}")
+log.debug("--- DEBUG: Inspecting Buffer at %s ---", hex(var_loc))
+# 1. Dump what the program has read from STDIN so far (truncated)
+stdin_dump = state.posix.dumps(0)
+log.debug("[DEBUG] STDIN len=%d head=%r", len(stdin_dump), stdin_dump[:256])
 
             # 2. Dump the specific string argument passed to printf
             # We load 32 bytes just to see what follows, even if var_len is 0
