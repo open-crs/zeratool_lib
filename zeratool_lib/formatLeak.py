@@ -5,7 +5,14 @@ import string
 from pwn import *
 
 
-def checkLeak(binary_name, properties, leak_format) -> bytes:
+def checkLeak(binary_name, properties, leak_format) -> bytes | None:
+    # No leak target requested (e.g. plain shellcode exploit) -> nothing to do.
+    # Avoids `re.match("", bytes)` TypeError when the default `""` falls through.
+    if not leak_format:
+        return None
+    if isinstance(leak_format, str):
+        leak_format = leak_format.encode()
+
     full_string = b""
     run_count = 50
 
