@@ -88,8 +88,8 @@ def checkLeak(binary_name, properties, leak_format) -> bytes:
             for j in range(format_count):
                 iter_num = (i * format_count) + j
                 input_string = input_string.replace(
-                    b"_%x", b"_%{}$".format(iter_num) + format_specifier, 1
-                ).rstrip("\x00")
+                    b"_%x", b"_%d$" % iter_num + format_specifier, 1
+                ).rstrip(b"\x00")
 
             # Create local process
             proc = process([binary_name, input_string])
@@ -105,7 +105,7 @@ def checkLeak(binary_name, properties, leak_format) -> bytes:
             # 4. hex to ascii converstion
             data_leaks = results.split(b"_")
             data_leaks = [
-                x[0:8] if all([y in string.hexdigits for y in x]) else b""
+                x[0:8] if all([y in string.hexdigits.encode() for y in x]) else b""
                 for x in data_leaks
             ]
             data_leaks = [
@@ -118,7 +118,7 @@ def checkLeak(binary_name, properties, leak_format) -> bytes:
 
             # Only return printable ASCII
             full_string = b"".join(
-                [x if x in string.printable else b"" for x in full_string]
+                [bytes([x]) if x in string.printable.encode() else b"" for x in full_string]
             )
 
         # Dumb check for finding flag
