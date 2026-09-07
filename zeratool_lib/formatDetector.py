@@ -70,7 +70,7 @@ def checkFormat(binary_name, inputType):
     except (KeyboardInterrupt, timeout_decorator.TimeoutError) as e:
         print("[~] Format check timed out")
 
-    if "input" in end_state.globals.keys():
+    if end_state is not None and "input" in end_state.globals.keys():
         run_environ["input"] = end_state.globals["input"]
         print("[+] Triggerable with input : {}".format(end_state.globals["input"]))
 
