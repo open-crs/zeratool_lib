@@ -49,7 +49,7 @@ def checkOverflow(binary_name, inputType):
     # Lame way to do a timeout
     try:
 
-        @timeout_decorator.timeout(120)
+        # @timeout_decorator.timeout(120)
         def exploreBinary(simgr):
             simgr.explore(
                 find=lambda s: "type" in s.globals, step_func=overflow_detect_filter

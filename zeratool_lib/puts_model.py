@@ -1,6 +1,7 @@
 import logging
 
 import angr
+import claripy
 from pwn import *
 
 log = logging.getLogger(__name__)
@@ -41,6 +42,5 @@ class putsFormat(angr.procedures.libc.puts.puts):
         strlen = angr.SIM_PROCEDURES["libc"]["strlen"]
         length = self.inline_call(strlen, string).ret_expr
         out = stdout.write(string, length)
-        stdout.write_data(self.state.solver.BVV(b"\n"))
-        return out + 1
+        stdout.write_data(claripy.BVV(0x0A, 8))
         return out + 1

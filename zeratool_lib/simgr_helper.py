@@ -26,10 +26,10 @@ def constrainToAddress(state, sym_val, addr, endian="little"):
         padded_addr = p32(topAddr, endian=endian) + p32(botAddr, endian=endian)
 
     constraints = []
-    for i in range(bits / 8):
+for i in range(bits // 8):
         curr_byte = sym_val.get_byte(i)
         constraint = claripy.And(curr_byte == padded_addr[i])
-        if state.se.satisfiable(extra_constraints=[constraint]):
+        if state.solver.satisfiable(extra_constraints=[constraint]):
             constraints.append(constraint)
 
     return constraints
@@ -292,11 +292,10 @@ def check_continuity(address, addresses, length):
 
 
 def overflow_detect_filter(simgr):
-
     for state in simgr.active:
-        if state.globals.get("type", None) == "overflow_variable":
+        user_input = state.globals.get("user_input", None)
+        if user_input is not None:
             log.info("Found vulnerable state. Overflow variable to win")
-            user_input = state.globals["user_input"]
             input_bytes = state.solver.eval(user_input, cast_to=bytes)
             log.info("[+] Vulnerable path found {}".format(input_bytes))
             state.globals["type"] = "overflow_variable"
@@ -429,7 +428,9 @@ def point_to_shellcode_filter(simgr):
 
             # Setup shellcode
             memory = state.memory.load(address, len(shellcode))
-            shellcode_bvv = state.solver.BVV(shellcode)
+            shellcode_bvv = claripy.BVV(
+                int.from_bytes(shellcode, "little"), len(shellcode) * 8
+            )
 
             if "leaked_type" in state.globals:
                 log.info("We have a leak, let's try and use that")
@@ -1116,7 +1117,7 @@ def get_num_constraints(chop_byte, state):
     # Do any constraints mention this BV?
     for constraint in constraints:
         if any(
-            chop_byte.structurally_match(x) for x in constraint.recursive_children_asts
+            chop_byte.structurally_match(x) for x in constraint.children_asts()
         ):
             i += 1
     # log.info("{} : {} : {}".format(chop_byte,i,state.solver.eval(chop_byte,cast_to=bytes)))
